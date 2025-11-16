@@ -36,27 +36,54 @@ async function fetchNews(company: string, ticker: string) {
   try {
     const newsApiKey = process.env.NEWS_API_KEY
 
-    if (newsApiKey) {
-      // News API 사용
-      const response = await axios.get(
-        `https://newsapi.org/v2/everything?q=${encodeURIComponent(company)}&sortBy=publishedAt&language=en&pageSize=20&apiKey=${newsApiKey}`
-      )
+    if (!newsApiKey) {
+      console.log('News API key not found')
+      return getDummyNews(company)
+    }
 
-      if (response.data.articles) {
-        return response.data.articles.map((article: any) => ({
+    // 한국 회사명인 경우 영어 이름도 함께 검색
+    const searchQuery = company.includes('삼성') ? 'Samsung' : 
+                       company.includes('SK') ? 'SK Hynix' :
+                       company.includes('네이버') ? 'Naver' :
+                       company.includes('카카오') ? 'Kakao' : company
+
+    console.log('Fetching news for:', searchQuery)
+    
+    // News API 사용
+    const response = await axios.get(
+      `https://newsapi.org/v2/everything?q=${encodeURIComponent(searchQuery)}&sortBy=publishedAt&language=en&pageSize=20&apiKey=${newsApiKey}`
+    )
+
+    console.log('News API response status:', response.status)
+
+    // API 에러 체크
+    if (response.data.status === 'error') {
+      console.error('News API error:', response.data.message)
+      throw new Error(response.data.message || '뉴스를 가져오는데 실패했습니다.')
+    }
+
+    if (response.data.articles && response.data.articles.length > 0) {
+      const articles = response.data.articles
+        .filter((article: any) => article.title && article.title !== '[Removed]')
+        .map((article: any) => ({
           title: article.title,
           description: article.description,
           url: article.url,
           publishedAt: article.publishedAt,
           source: article.source?.name,
         }))
+      
+      if (articles.length > 0) {
+        console.log(`Found ${articles.length} news articles`)
+        return articles
       }
     }
 
-    // API 키가 없거나 실패 시 더미 뉴스 반환
+    console.log('No articles found, using dummy news')
     return getDummyNews(company)
-  } catch (error) {
-    console.error('News fetch error:', error)
+  } catch (error: any) {
+    console.error('News fetch error:', error.response?.data || error.message)
+    // 에러가 발생해도 더미 뉴스 반환 (서비스 중단 방지)
     return getDummyNews(company)
   }
 }

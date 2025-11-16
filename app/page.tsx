@@ -20,10 +20,12 @@ export default function Home() {
     try {
       // 티커 검색 및 주가 정보 가져오기
       const stockResponse = await fetch(`/api/stock?company=${encodeURIComponent(companyName)}`)
-      if (!stockResponse.ok) {
-        throw new Error('주가 정보를 가져오는데 실패했습니다.')
-      }
       const stock = await stockResponse.json()
+      
+      if (!stockResponse.ok) {
+        throw new Error(stock.error || '주가 정보를 가져오는데 실패했습니다.')
+      }
+      
       setStockData(stock)
 
       // 뉴스 정보 가져오기
@@ -32,10 +34,15 @@ export default function Home() {
         if (newsResponse.ok) {
           const news = await newsResponse.json()
           setNewsData(news)
+        } else {
+          const newsError = await newsResponse.json()
+          console.error('News API error:', newsError)
+          // 뉴스 에러는 치명적이지 않으므로 무시
         }
       }
     } catch (err: any) {
       setError(err.message || '오류가 발생했습니다.')
+      console.error('Search error:', err)
     } finally {
       setLoading(false)
     }

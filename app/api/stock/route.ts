@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
     
     if (!ticker) {
       return NextResponse.json(
-        { error: '티커를 찾을 수 없습니다.' },
+        { error: '티커를 찾을 수 없습니다. 다른 회사명으로 시도해주세요.' },
         { status: 404 }
       )
     }
@@ -33,8 +33,10 @@ export async function GET(request: NextRequest) {
     })
   } catch (error: any) {
     console.error('Stock API Error:', error)
+    // 에러 메시지를 더 명확하게 전달
+    const errorMessage = error.message || '주가 정보를 가져오는데 실패했습니다.'
     return NextResponse.json(
-      { error: error.message || '주가 정보를 가져오는데 실패했습니다.' },
+      { error: errorMessage },
       { status: 500 }
     )
   }
@@ -90,6 +92,7 @@ async function getStockData(ticker: string) {
   try {
     const apiKey = process.env.ALPHA_VANTAGE_API_KEY
     if (!apiKey) {
+      console.log('Alpha Vantage API key not found')
       // API 키가 없으면 더미 데이터 반환
       return {
         price: 150.25,
@@ -100,32 +103,51 @@ async function getStockData(ticker: string) {
       }
     }
 
+    console.log('Fetching stock data for ticker:', ticker)
     const response = await axios.get(
       `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${ticker}&apikey=${apiKey}`
     )
 
+    console.log('Alpha Vantage response:', JSON.stringify(response.data).substring(0, 500))
+
+    // API rate limit 체크
+    if (response.data['Note']) {
+      console.error('API rate limit:', response.data['Note'])
+      throw new Error('API 호출 제한에 도달했습니다. 잠시 후 다시 시도해주세요.')
+    }
+
+    // 에러 메시지 체크
+    if (response.data['Error Message']) {
+      console.error('API error:', response.data['Error Message'])
+      throw new Error(response.data['Error Message'])
+    }
+
     const quote = response.data['Global Quote']
-    if (!quote) {
+    if (!quote || Object.keys(quote).length === 0) {
+      console.error('No quote data found in response')
       throw new Error('주가 정보를 찾을 수 없습니다.')
     }
 
-    return {
-      price: parseFloat(quote['05. price']),
-      change: parseFloat(quote['09. change']),
-      changePercent: parseFloat(quote['10. change percent'].replace('%', '')),
-      volume: parseInt(quote['06. volume']),
-      marketCap: parseFloat(quote['05. price']) * parseInt(quote['06. volume']),
+    const price = parseFloat(quote['05. price'])
+    const change = parseFloat(quote['09. change'])
+    const changePercent = parseFloat(quote['10. change percent'].replace('%', ''))
+    const volume = parseInt(quote['06. volume'])
+
+    if (isNaN(price)) {
+      throw new Error('주가 데이터 형식이 올바르지 않습니다.')
     }
-  } catch (error) {
+
+    return {
+      price,
+      change,
+      changePercent,
+      volume,
+      marketCap: price * volume,
+    }
+  } catch (error: any) {
     console.error('Stock data fetch error:', error)
-    // 에러 발생 시 더미 데이터 반환
-    return {
-      price: 150.25,
-      change: 2.5,
-      changePercent: 1.69,
-      volume: 50000000,
-      marketCap: 2500000000000,
-    }
+    // 에러를 다시 throw하여 상위에서 처리하도록 함
+    throw error
   }
 }
 
