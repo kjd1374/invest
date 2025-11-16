@@ -45,46 +45,142 @@ export async function GET(request: NextRequest) {
 // 티커 검색 함수
 async function searchTicker(companyName: string): Promise<string | null> {
   try {
-    // Alpha Vantage API를 사용한 티커 검색
+    // 1. 먼저 매핑에서 확인 (한글 회사명 지원)
+    const mappedTicker = getTickerFromMapping(companyName)
+    if (mappedTicker) {
+      console.log('Found ticker from mapping:', mappedTicker)
+      return mappedTicker
+    }
+
+    // 2. Alpha Vantage API를 사용한 티커 검색
     const apiKey = process.env.ALPHA_VANTAGE_API_KEY
     if (!apiKey) {
-      // API 키가 없으면 간단한 매핑 사용 (데모용)
+      // API 키가 없으면 매핑만 사용
+      return null
+    }
+
+    // 3. 한글 회사명인 경우 영어 이름으로 변환
+    const searchQuery = convertKoreanToEnglish(companyName) || companyName
+    console.log('Searching ticker for:', searchQuery)
+
+    const response = await axios.get(
+      `https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${encodeURIComponent(searchQuery)}&apikey=${apiKey}`
+    )
+
+    // API rate limit 체크
+    if (response.data['Note']) {
+      console.error('API rate limit:', response.data['Note'])
+      // Rate limit이면 매핑으로 폴백
       return getTickerFromMapping(companyName)
     }
 
-    const response = await axios.get(
-      `https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${encodeURIComponent(companyName)}&apikey=${apiKey}`
-    )
-
     if (response.data.bestMatches && response.data.bestMatches.length > 0) {
-      return response.data.bestMatches[0]['1. symbol']
+      const ticker = response.data.bestMatches[0]['1. symbol']
+      console.log('Found ticker from API:', ticker)
+      return ticker
     }
 
+    // API에서 찾지 못하면 매핑으로 폴백
     return getTickerFromMapping(companyName)
   } catch (error) {
     console.error('Ticker search error:', error)
+    // 에러 발생 시 매핑으로 폴백
     return getTickerFromMapping(companyName)
   }
 }
 
-// 간단한 티커 매핑 (API 키가 없을 때 사용)
-function getTickerFromMapping(companyName: string): string | null {
-  const mapping: { [key: string]: string } = {
-    apple: 'AAPL',
-    microsoft: 'MSFT',
-    google: 'GOOGL',
-    amazon: 'AMZN',
-    tesla: 'TSLA',
-    meta: 'META',
-    nvidia: 'NVDA',
-    삼성전자: '005930.KS',
-    sk하이닉스: '000660.KS',
-    네이버: '035420.KS',
-    카카오: '035720.KS',
+// 한글 회사명을 영어 이름으로 변환
+function convertKoreanToEnglish(companyName: string): string | null {
+  const koreanToEnglish: { [key: string]: string } = {
+    '삼성전자': 'Samsung Electronics',
+    '삼성': 'Samsung',
+    'sk하이닉스': 'SK Hynix',
+    'sk': 'SK Hynix',
+    '네이버': 'Naver',
+    '카카오': 'Kakao',
+    'lg전자': 'LG Electronics',
+    'lg': 'LG',
+    '현대자동차': 'Hyundai Motor',
+    '현대': 'Hyundai',
+    '기아': 'Kia',
+    '포스코': 'POSCO',
+    '셀트리온': 'Celltrion',
+    '아모레퍼시픽': 'Amorepacific',
+    '한화': 'Hanwha',
+    '롯데': 'Lotte',
+    'cj': 'CJ',
   }
 
-  const key = companyName.toLowerCase().trim()
-  return mapping[key] || null
+  const normalized = companyName.trim()
+  
+  // 정확한 매칭 먼저 시도
+  if (koreanToEnglish[normalized]) {
+    return koreanToEnglish[normalized]
+  }
+
+  // 부분 매칭 시도
+  for (const [korean, english] of Object.entries(koreanToEnglish)) {
+    if (normalized.includes(korean) || korean.includes(normalized)) {
+      return english
+    }
+  }
+
+  return null
+}
+
+// 간단한 티커 매핑
+function getTickerFromMapping(companyName: string): string | null {
+  const mapping: { [key: string]: string } = {
+    // 영어 회사명 (소문자)
+    'apple': 'AAPL',
+    'microsoft': 'MSFT',
+    'google': 'GOOGL',
+    'amazon': 'AMZN',
+    'tesla': 'TSLA',
+    'meta': 'META',
+    'nvidia': 'NVDA',
+    'samsung': '005930.KS',
+    'samsung electronics': '005930.KS',
+    // 한글 회사명
+    '삼성전자': '005930.KS',
+    '삼성': '005930.KS',
+    'sk하이닉스': '000660.KS',
+    'sk': '000660.KS',
+    '네이버': '035420.KS',
+    '카카오': '035720.KS',
+    'lg전자': '066570.KS',
+    'lg': '066570.KS',
+    '현대자동차': '005380.KS',
+    '현대': '005380.KS',
+    '기아': '000270.KS',
+    '포스코': '005490.KS',
+    '셀트리온': '068270.KS',
+    '아모레퍼시픽': '090430.KS',
+    '한화': '000880.KS',
+    '롯데': '004990.KS',
+    'cj': '001040.KS',
+  }
+
+  // 정확한 매칭 (대소문자 구분 없이)
+  const normalized = companyName.trim().toLowerCase()
+  if (mapping[normalized]) {
+    return mapping[normalized]
+  }
+
+  // 한글은 대소문자 변환 없이 직접 매칭
+  const originalTrimmed = companyName.trim()
+  if (mapping[originalTrimmed]) {
+    return mapping[originalTrimmed]
+  }
+
+  // 부분 매칭 시도 (한글 회사명)
+  for (const [key, ticker] of Object.entries(mapping)) {
+    if (originalTrimmed.includes(key) || key.includes(originalTrimmed)) {
+      return ticker
+    }
+  }
+
+  return null
 }
 
 // 주가 정보 가져오기
